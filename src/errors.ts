@@ -36,7 +36,11 @@ export function parseErrorBody(body: string): string {
   } catch {
     // not JSON
   }
-  return body.trim() || "(empty response body)";
+  // Non-JSON bodies (e.g. a 429 rate-limit HTML page) can be arbitrarily large; strip tags,
+  // collapse whitespace and cap the length so error messages stay readable.
+  const cleaned = body.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
+  if (cleaned.length === 0) return "(empty response body)";
+  return cleaned.length > 500 ? `${cleaned.slice(0, 500)}…` : cleaned;
 }
 
 export function successResponse(data: unknown): McpToolResponse {

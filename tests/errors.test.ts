@@ -19,12 +19,20 @@ describe("parseErrorBody", () => {
     expect(parseErrorBody(body)).toBe("Bad request (title is required)");
   });
 
-  it("falls back to raw body for non-JSON", () => {
-    expect(parseErrorBody("<html>gateway</html>")).toBe("<html>gateway</html>");
+  it("falls back to raw body for non-JSON, stripping tags and collapsing whitespace", () => {
+    expect(parseErrorBody("<html>gateway</html>")).toBe("gateway");
   });
 
   it("describes an empty body", () => {
     expect(parseErrorBody("")).toBe("(empty response body)");
+  });
+
+  it("truncates a long HTML fallback body to 500 chars with a trailing ellipsis", () => {
+    const html = `<html><body>${"a".repeat(1200)}</body></html>`;
+    const result = parseErrorBody(html);
+    expect(result.length).toBeLessThanOrEqual(501);
+    expect(result).not.toContain("<");
+    expect(result.endsWith("…")).toBe(true);
   });
 });
 
