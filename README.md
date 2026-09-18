@@ -68,9 +68,11 @@ Bitbucket → workspace (or project/repo) **Settings → Access tokens → Creat
 | `user_me`, `workspaces_list` | `read:user:bitbucket`, `read:workspace:bitbucket` | `account` |
 | `projects_list` | `read:project:bitbucket` | `project` |
 | `repos_*`, `branches_list`, `tags_list`, `commits_*`, `diff_get`, `src_read` | `read:repository:bitbucket` | `repository` |
-| `prs_*` read + `prs_comment_create` | `read:pullrequest:bitbucket` | `pullrequest` |
+| `prs_*` read + `prs_comment_create`¹ | `read:pullrequest:bitbucket` | `pullrequest` |
 | `prs_create/update/approve/unapprove/request_changes/merge/decline` | `write:pullrequest:bitbucket` | `pullrequest:write` |
 | `pipelines_*` | `read:pipeline:bitbucket` | `pipeline` |
+
+¹ Bitbucket's read scopes explicitly include commenting on pull requests.
 
 ## Environment variables
 

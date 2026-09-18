@@ -73,7 +73,7 @@ export function createCodeTools(client: BitbucketClient): ToolDefinition[] {
       name: "diff_get",
       title: "Get Diff",
       description:
-        'Unified diff for a commit or between two refs. `spec` is a hash (diff against its parent) or "source..destination" (e.g. "feature/x..master" shows what feature/x adds to master). Set `diffstat` to true for a JSON per-file summary instead of the patch.',
+        'Unified diff for a commit or between two refs. `spec` is a hash (diff against its parent) or "source..destination" (e.g. "feature/x..master" shows what feature/x adds to master). Set `diffstat` to true for a JSON per-file summary instead of the patch. `fields`, `page` and `pagelen` apply only when `diffstat` is true.',
       scopeHint: "repository",
       inputSchema: {
         ...repoFields,

@@ -74,7 +74,8 @@ export function createPullRequestTools(client: BitbucketClient): ToolDefinition[
     defineTool({
       name: "prs_diff",
       title: "Get Pull Request Diff",
-      description: "Unified diff of a pull request against its destination. Set `diffstat` to true for a JSON per-file summary (status, lines added/removed) instead of the patch.",
+      description:
+        "Unified diff of a pull request against its destination. Set `diffstat` to true for a JSON per-file summary (status, lines added/removed) instead of the patch. `fields`, `page` and `pagelen` apply only when `diffstat` is true.",
       scopeHint: "pullrequest",
       inputSchema: {
         ...repoFields,
