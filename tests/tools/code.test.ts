@@ -80,12 +80,13 @@ describe("code tools", () => {
     expect(JSON.parse(res.content[0].text).values[0].path).toBe("src");
   });
 
-  it("src_read returns file content as text and encodes the path", async () => {
+  it("src_read encodes a slash-free path segment and hits the file directly", async () => {
     const fetchMock = installFetch(
       mockResponse({ text: "export const a = 1;\n", headers: { "content-type": "text/plain; charset=utf-8" } })
     );
-    const res = await tool("src_read").handler({ repo_slug: "r", commit: "feature/x", path: "src/my file.ts" });
-    expect(lastCall(fetchMock).url.pathname).toBe("/2.0/repositories/southti/r/src/feature%2Fx/src/my%20file.ts");
+    const res = await tool("src_read").handler({ repo_slug: "r", commit: "master", path: "src/my file.ts" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(lastCall(fetchMock).url.pathname).toBe("/2.0/repositories/southti/r/src/master/src/my%20file.ts");
     expect(res.content[0].text).toBe("export const a = 1;\n");
   });
 
@@ -94,5 +95,37 @@ describe("code tools", () => {
     const res = await tool("src_read").handler({ repo_slug: "r", commit: "m", path: "big.txt", max_bytes: 10 });
     expect(res.content[0].text.startsWith("xxxxxxxxxx\n")).toBe(true);
     expect(res.content[0].text).toContain("[truncated: showing 10 of 100 bytes]");
+  });
+
+  it("src_read resolves a slashed branch name to a commit hash before reading", async () => {
+    const fetchMock = installFetch(
+      mockResponse({ body: { target: { hash: "abc123" } } }),
+      mockResponse({ text: "content", headers: { "content-type": "text/plain" } })
+    );
+    const res = await tool("src_read").handler({ repo_slug: "r", commit: "feature/x", path: "README.md" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = fetchMock.mock.calls[0];
+    const firstUrl = new URL(first[0] as string);
+    expect(firstUrl.pathname).toBe("/2.0/repositories/southti/r/refs/branches/feature%2Fx");
+    expect(firstUrl.searchParams.get("fields")).toBe("target.hash");
+    const { url: secondUrl } = lastCall(fetchMock);
+    expect(secondUrl.pathname).toBe("/2.0/repositories/southti/r/src/abc123/README.md");
+    expect(res.content[0].text).toBe("content");
+  });
+
+  it("src_read falls back to a tag when the slashed ref is not a branch", async () => {
+    const fetchMock = installFetch(
+      mockResponse({ status: 404, body: { error: { message: "Branch not found" } } }),
+      mockResponse({ body: { target: { hash: "t1" } } }),
+      mockResponse({ text: "tag content", headers: { "content-type": "text/plain" } })
+    );
+    const res = await tool("src_read").handler({ repo_slug: "r", commit: "release/1.0", path: "README.md" });
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    const second = fetchMock.mock.calls[1];
+    const secondUrl = new URL(second[0] as string);
+    expect(secondUrl.pathname).toBe("/2.0/repositories/southti/r/refs/tags/release%2F1.0");
+    const { url: thirdUrl } = lastCall(fetchMock);
+    expect(thirdUrl.pathname).toBe("/2.0/repositories/southti/r/src/t1/README.md");
+    expect(res.content[0].text).toBe("tag content");
   });
 });

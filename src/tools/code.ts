@@ -1,12 +1,33 @@
 import { z } from "zod";
 import type { BitbucketClient } from "../client.js";
 import { encodePath, seg } from "../client.js";
-import { successResponse, textResponse } from "../errors.js";
+import { BitbucketApiError, successResponse, textResponse } from "../errors.js";
 import { paginationFields, paginationParams } from "../pagination.js";
-import { defineTool, fieldsField, repoFields, repoPath, truncateBytes } from "./common.js";
+import { defineTool, fieldsField, repoFields, repoPath, truncateBytes, type RepoInput } from "./common.js";
 import type { ToolDefinition } from "./types.js";
 
 const DEFAULT_MAX_BYTES = 200_000;
+
+/**
+ * Bitbucket's `/src/{commit}/{path}` endpoint rejects a percent-encoded slash in `{commit}`
+ * (e.g. `src/feature%2Fx/` -> 404), while `/refs/branches/{name}` and `/refs/tags/{name}` accept
+ * it. When `ref` contains a slash, resolve it to a commit hash via those endpoints first.
+ */
+async function resolveRef(client: BitbucketClient, input: RepoInput, ref: string): Promise<string> {
+  if (!ref.includes("/")) return ref;
+  const base = repoPath(client, input);
+  for (const kind of ["branches", "tags"] as const) {
+    try {
+      const data = await client.get<{ target?: { hash?: string } }>(`${base}/refs/${kind}/${seg(ref)}`, {
+        fields: "target.hash"
+      });
+      if (data.target?.hash) return data.target.hash;
+    } catch (e) {
+      if (!(e instanceof BitbucketApiError) || e.status !== 404) throw e;
+    }
+  }
+  return ref;
+}
 
 export function createCodeTools(client: BitbucketClient): ToolDefinition[] {
   return [
@@ -85,7 +106,7 @@ export function createCodeTools(client: BitbucketClient): ToolDefinition[] {
       name: "src_read",
       title: "Read Source",
       description:
-        'Read a file or list a directory at a given commit/branch/tag. Empty `path` lists the repository root. Directories return a paginated JSON listing (type "commit_file" or "commit_directory"); files return their raw content, truncated at `max_bytes`.',
+        'Read a file or list a directory at a given commit/branch/tag. Empty `path` lists the repository root. Directories return a paginated JSON listing (type "commit_file" or "commit_directory"); files return their raw content, truncated at `max_bytes`. Branch or tag names containing `/` are resolved to a commit hash first (Bitbucket rejects an encoded slash in this endpoint\'s commit segment).',
       scopeHint: "repository",
       inputSchema: {
         ...repoFields,
@@ -101,7 +122,8 @@ export function createCodeTools(client: BitbucketClient): ToolDefinition[] {
       },
       handler: async (input) => {
         const encoded = encodePath(input.path);
-        const path = `${repoPath(client, input)}/src/${seg(input.commit)}/${encoded}`;
+        const commit = await resolveRef(client, input, input.commit);
+        const path = `${repoPath(client, input)}/src/${seg(commit)}/${encoded}`;
         const raw = await client.getRaw(path, { ...paginationParams(input) });
         if (raw.contentType.includes("json")) {
           return successResponse(JSON.parse(raw.text));
