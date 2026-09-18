@@ -16,10 +16,11 @@ Your MCP client launches the server via `npx`; nothing to install by hand.
 ### Claude Code (CLI)
 
 ```bash
-claude mcp add --scope user bitbucket npx -- -y bitbucket-cloud-mcp \
+claude mcp add --scope user bitbucket \
   -e BITBUCKET_EMAIL=you@company.com \
   -e BITBUCKET_API_TOKEN=your-api-token \
-  -e BITBUCKET_WORKSPACE=your-workspace
+  -e BITBUCKET_WORKSPACE=your-workspace \
+  -- npx -y bitbucket-cloud-mcp
 ```
 
 ### Claude Desktop
@@ -84,7 +85,7 @@ Bitbucket → workspace (or project/repo) **Settings → Access tokens → Creat
 
 ## Tools (30)
 
-All tools accept `workspace?` (falls back to `BITBUCKET_WORKSPACE`), and every repository tool takes `repo_slug`. Most read tools accept `fields?` (comma list to shrink the response) and `page?`/`pagelen?` for pagination.
+Every workspace- or repository-level tool accepts `workspace?` (falls back to `BITBUCKET_WORKSPACE`), and every repository tool takes `repo_slug`. Most read tools accept `fields?` (comma list to shrink the response) and `page?`/`pagelen?` for pagination.
 
 ### Account and workspace (read)
 
