@@ -102,8 +102,158 @@ export function createPullRequestTools(client: BitbucketClient): ToolDefinition[
   return [...readTools, ...createWriteTools(client)];
 }
 
-function createWriteTools(_client: BitbucketClient): ToolDefinition[] {
-  return []; // filled in Task 11
-}
+const MERGE_STRATEGIES = ["merge_commit", "squash", "fast_forward"] as const;
 
-export { compact, prPath, idField };
+function createWriteTools(client: BitbucketClient): ToolDefinition[] {
+  return [
+    defineTool({
+      name: "prs_create",
+      title: "Create Pull Request",
+      description:
+        "Open a pull request from `source_branch` into `destination_branch` (defaults to the repository's main branch). `reviewers` takes user UUIDs (with braces) as returned by prs_get/user_me. Returns the created PR.",
+      scopeHint: "pullrequest:write",
+      inputSchema: {
+        ...repoFields,
+        title: z.string().min(1),
+        source_branch: z.string().min(1).describe("Branch with the changes."),
+        destination_branch: z.string().min(1).optional().describe("Target branch; defaults to the main branch."),
+        description: z.string().optional().describe("Markdown description."),
+        reviewers: z.array(z.string().min(1)).optional().describe("Reviewer user UUIDs, e.g. {a1b2-...}."),
+        close_source_branch: z.boolean().optional().describe("Delete the source branch after merge."),
+        draft: z.boolean().optional()
+      },
+      handler: async (input) => {
+        const payload = compact({
+          title: input.title,
+          description: input.description,
+          source: { branch: { name: input.source_branch } },
+          destination: input.destination_branch ? { branch: { name: input.destination_branch } } : undefined,
+          reviewers: input.reviewers?.map((uuid) => ({ uuid })),
+          close_source_branch: input.close_source_branch,
+          draft: input.draft
+        });
+        return successResponse(await client.post(`${repoPath(client, input)}/pullrequests`, payload));
+      }
+    }),
+    defineTool({
+      name: "prs_update",
+      title: "Update Pull Request",
+      description: "Update title, description, destination branch, reviewers, close-source-branch flag or draft state of an open pull request. Only the given fields change.",
+      scopeHint: "pullrequest:write",
+      inputSchema: {
+        ...repoFields,
+        ...idField,
+        title: z.string().min(1).optional(),
+        description: z.string().optional(),
+        destination_branch: z.string().min(1).optional(),
+        reviewers: z.array(z.string().min(1)).optional().describe("Replaces the full reviewer list (user UUIDs)."),
+        close_source_branch: z.boolean().optional(),
+        draft: z.boolean().optional()
+      },
+      handler: async (input) => {
+        const payload = compact({
+          title: input.title,
+          description: input.description,
+          destination: input.destination_branch ? { branch: { name: input.destination_branch } } : undefined,
+          reviewers: input.reviewers?.map((uuid) => ({ uuid })),
+          close_source_branch: input.close_source_branch,
+          draft: input.draft
+        });
+        return successResponse(await client.put(prPath(client, input, input.id), payload));
+      }
+    }),
+    defineTool({
+      name: "prs_comment_create",
+      title: "Comment on Pull Request",
+      description:
+        "Add a markdown comment to a pull request. Use `parent_id` to reply to an existing comment and `inline` ({ path, to }) to attach it to a line of the new file (`from` for a line of the old file).",
+      scopeHint: "pullrequest",
+      inputSchema: {
+        ...repoFields,
+        ...idField,
+        content: z.string().min(1).describe("Comment body in markdown."),
+        parent_id: z.number().int().positive().optional().describe("ID of the comment being replied to."),
+        inline: z
+          .object({
+            path: z.string().min(1).describe("File path in the diff."),
+            to: z.number().int().positive().optional().describe("Line number in the new version."),
+            from: z.number().int().positive().optional().describe("Line number in the old version.")
+          })
+          .optional()
+      },
+      handler: async (input) => {
+        const payload = compact({
+          content: { raw: input.content },
+          parent: input.parent_id !== undefined ? { id: input.parent_id } : undefined,
+          inline: input.inline ? compact({ path: input.inline.path, to: input.inline.to, from: input.inline.from }) : undefined
+        });
+        return successResponse(await client.post(`${prPath(client, input, input.id)}/comments`, payload));
+      }
+    }),
+    defineTool({
+      name: "prs_approve",
+      title: "Approve Pull Request",
+      description: "Approve a pull request as the authenticated user/token.",
+      scopeHint: "pullrequest:write",
+      inputSchema: { ...repoFields, ...idField },
+      handler: async (input) => successResponse(await client.post(`${prPath(client, input, input.id)}/approve`))
+    }),
+    defineTool({
+      name: "prs_unapprove",
+      title: "Remove Pull Request Approval",
+      description: "Withdraw the authenticated user's approval from a pull request.",
+      scopeHint: "pullrequest:write",
+      inputSchema: { ...repoFields, ...idField },
+      handler: async (input) => {
+        await client.delete(`${prPath(client, input, input.id)}/approve`);
+        return successResponse({ id: input.id, approved: false });
+      }
+    }),
+    defineTool({
+      name: "prs_request_changes",
+      title: "Request Changes on Pull Request",
+      description: "Mark a pull request as 'changes requested'. Set `revoke` to true to remove that mark.",
+      scopeHint: "pullrequest:write",
+      inputSchema: { ...repoFields, ...idField, revoke: z.boolean().optional().describe("Remove the changes-requested status.") },
+      handler: async (input) => {
+        const path = `${prPath(client, input, input.id)}/request-changes`;
+        if (input.revoke) {
+          await client.delete(path);
+          return successResponse({ id: input.id, changes_requested: false });
+        }
+        return successResponse(await client.post(path));
+      }
+    }),
+    defineTool({
+      name: "prs_merge",
+      title: "Merge Pull Request",
+      description:
+        "Merge an open pull request. `merge_strategy`: merge_commit (default), squash or fast_forward. Bitbucket may answer 202 with a poll link for large merges; call prs_get afterwards to confirm state MERGED.",
+      scopeHint: "pullrequest:write",
+      inputSchema: {
+        ...repoFields,
+        ...idField,
+        merge_strategy: z.enum(MERGE_STRATEGIES).optional(),
+        message: z.string().optional().describe("Merge commit message."),
+        close_source_branch: z.boolean().optional()
+      },
+      handler: async (input) => {
+        const payload = compact({
+          type: "pullrequest",
+          merge_strategy: input.merge_strategy,
+          message: input.message,
+          close_source_branch: input.close_source_branch
+        });
+        return successResponse(await client.post(`${prPath(client, input, input.id)}/merge`, payload));
+      }
+    }),
+    defineTool({
+      name: "prs_decline",
+      title: "Decline Pull Request",
+      description: "Decline (close without merging) an open pull request.",
+      scopeHint: "pullrequest:write",
+      inputSchema: { ...repoFields, ...idField },
+      handler: async (input) => successResponse(await client.post(`${prPath(client, input, input.id)}/decline`))
+    })
+  ];
+}
