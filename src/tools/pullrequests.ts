@@ -138,7 +138,8 @@ function createWriteTools(client: BitbucketClient): ToolDefinition[] {
     defineTool({
       name: "prs_update",
       title: "Update Pull Request",
-      description: "Update title, description, destination branch, reviewers, close-source-branch flag or draft state of an open pull request. Only the given fields change.",
+      description:
+        "Update title, description, destination branch, reviewers, close-source-branch flag or draft state of an open pull request. Fields you omit keep their current value (the tool reads the PR first).",
       scopeHint: "pullrequest:write",
       inputSchema: {
         ...repoFields,
@@ -151,15 +152,32 @@ function createWriteTools(client: BitbucketClient): ToolDefinition[] {
         draft: z.boolean().optional()
       },
       handler: async (input) => {
-        const payload = compact({
-          title: input.title,
-          description: input.description,
-          destination: input.destination_branch ? { branch: { name: input.destination_branch } } : undefined,
-          reviewers: input.reviewers?.map((uuid) => ({ uuid })),
-          close_source_branch: input.close_source_branch,
-          draft: input.draft
+        const path = prPath(client, input, input.id);
+        // Bitbucket's PUT may reset omitted mutable fields (reviewers in particular), so fetch
+        // the current PR first and overlay the supplied inputs onto it.
+        const current = await client.get<{
+          title?: string;
+          description?: string | { raw?: string };
+          destination?: { branch?: { name?: string } };
+          reviewers?: { uuid?: string }[];
+          close_source_branch?: boolean;
+          draft?: boolean;
+        }>(path, {
+          fields: "title,description,destination.branch.name,reviewers.uuid,close_source_branch,draft"
         });
-        return successResponse(await client.put(prPath(client, input, input.id), payload));
+        const currentDescription = typeof current.description === "string" ? current.description : current.description?.raw;
+        const destinationBranch = input.destination_branch ?? current.destination?.branch?.name;
+        const payload = compact({
+          title: input.title ?? current.title,
+          description: input.description ?? currentDescription,
+          destination: destinationBranch ? { branch: { name: destinationBranch } } : undefined,
+          reviewers: (input.reviewers ?? current.reviewers?.map((r) => r.uuid).filter((u): u is string => !!u) ?? []).map(
+            (uuid) => ({ uuid })
+          ),
+          close_source_branch: input.close_source_branch ?? current.close_source_branch,
+          draft: input.draft ?? current.draft
+        });
+        return successResponse(await client.put(path, payload));
       }
     }),
     defineTool({

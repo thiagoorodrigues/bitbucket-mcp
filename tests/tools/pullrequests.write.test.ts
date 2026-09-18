@@ -53,13 +53,68 @@ describe("pull request write tools", () => {
     });
   });
 
-  it("prs_update sends PUT with partial body", async () => {
-    const fetchMock = installFetch(mockResponse({ body: { id: 4 } }));
+  it("prs_update fetches current values first and merges supplied fields into the PUT body", async () => {
+    const fetchMock = installFetch(
+      mockResponse({
+        body: {
+          title: "Old",
+          description: "d",
+          destination: { branch: { name: "master" } },
+          reviewers: [{ uuid: "{u1}" }],
+          close_source_branch: false,
+          draft: false
+        }
+      }),
+      mockResponse({ body: { id: 4 } })
+    );
     await tool("prs_update").handler({ repo_slug: "r", id: 4, title: "New", destination_branch: "develop" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const first = fetchMock.mock.calls[0];
+    const firstUrl = new URL(first[0] as string);
+    const firstInit = first[1] as RequestInit;
+    expect(firstInit.method).toBe("GET");
+    expect(firstUrl.pathname).toBe("/2.0/repositories/southti/r/pullrequests/4");
+    expect(firstUrl.searchParams.get("fields")).toBe(
+      "title,description,destination.branch.name,reviewers.uuid,close_source_branch,draft"
+    );
+
     const { url, init } = lastCall(fetchMock);
     expect(init.method).toBe("PUT");
     expect(url.pathname).toBe("/2.0/repositories/southti/r/pullrequests/4");
-    expect(body(fetchMock)).toEqual({ title: "New", destination: { branch: { name: "develop" } } });
+    expect(body(fetchMock)).toEqual({
+      title: "New",
+      description: "d",
+      destination: { branch: { name: "develop" } },
+      reviewers: [{ uuid: "{u1}" }],
+      close_source_branch: false,
+      draft: false
+    });
+  });
+
+  it("prs_update with reviewers: [] sends an explicit empty reviewer list", async () => {
+    const fetchMock = installFetch(
+      mockResponse({
+        body: {
+          title: "Old",
+          description: "d",
+          destination: { branch: { name: "master" } },
+          reviewers: [{ uuid: "{u1}" }],
+          close_source_branch: false,
+          draft: false
+        }
+      }),
+      mockResponse({ body: { id: 4 } })
+    );
+    await tool("prs_update").handler({ repo_slug: "r", id: 4, reviewers: [] });
+    expect(body(fetchMock)).toEqual({
+      title: "Old",
+      description: "d",
+      destination: { branch: { name: "master" } },
+      reviewers: [],
+      close_source_branch: false,
+      draft: false
+    });
   });
 
   it("prs_comment_create supports plain, reply and inline comments", async () => {
